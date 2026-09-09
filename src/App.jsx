@@ -11,16 +11,16 @@ export default function App() {
   })
   const [editingId, setEditingId] = useState(null)
   
-  // NEW: We check the browser's "backpack" to see if it was sorted last time!
+  // Check the browser's "backpack" to see if it was sorted last time
   const [isSorted, setIsSorted] = useState(() => {
     return localStorage.getItem('isSorted') === 'true'
   })
 
-  // --- QUICKSORT ALGORITHM HELPERS ---
+  // QUICKSORT ALGORITHM HELPERS
   const getPriorityValue = (p) => (p === 'High' ? 3 : p === 'Medium' ? 2 : 1)
 
   const partition = (arr, low, high) => {
-    // We strictly use the last/highest index as the pivot
+    // Use the last/highest index as the pivot
     const pivotValue = getPriorityValue(arr[high].priority)
     let i = low - 1
     
@@ -49,7 +49,7 @@ export default function App() {
     }
   }
 
-  // --- FETCHING & SORTING LOGIC ---
+  // FETCHING & SORTING LOGIC
   const fetchTasks = async (overrideSort = null) => {
     const { data, error } = await supabase
       .from('tasks')
@@ -61,10 +61,10 @@ export default function App() {
       return
     }
 
-    // Decide if we should sort. Use override if provided, otherwise check state
+    // Decide if should sort. Use override if provided, otherwise check state
     const shouldSort = overrideSort !== null ? overrideSort : isSorted
 
-    // If true, intercept the data and run Quicksort before showing the user!
+    // If true, intercept the data and run Quicksort before showing the user
     if (shouldSort && data.length > 0) {
       quickSort(data, 0, data.length - 1)
     }
@@ -80,7 +80,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // --- BUTTON HANDLERS ---
+  // BUTTON HANDLERS
   const enableSort = () => {
     setIsSorted(true)
     localStorage.setItem('isSorted', 'true') // Put note in backpack
@@ -93,7 +93,7 @@ export default function App() {
     fetchTasks(false)
   }
 
-  // --- CRUD OPERATIONS ---
+  // CRUD OPERATIONS
   const handleSubmit = async (e) => {
     e.preventDefault() 
     
@@ -153,14 +153,14 @@ export default function App() {
     }
   }
 
-  // --- UI RENDERING ---
+  // UI RENDERING
   return (
     <div className="min-h-screen bg-stone-100 p-8 font-sans text-stone-800">
       <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-lg border-t-8 border-up-maroon">
         
         <h1 className="text-4xl font-extrabold mb-6 text-center text-up-maroon tracking-tight">My Task Manager</h1>
 
-        {/* --- ADD/EDIT FORM --- */}
+        {/* ADD/EDIT FORM */}
         <form onSubmit={handleSubmit} className="mb-8 space-y-4 bg-stone-50 p-5 rounded-lg border border-stone-200 transition-all duration-300 hover:shadow-md">
           <h2 className="text-lg font-bold text-stone-700 border-b-2 border-stone-200 pb-2 flex items-center gap-2">
             {editingId ? '✏️ Edit Task' : 'Add Your New Task'}
@@ -233,7 +233,7 @@ export default function App() {
           </div>
         </form>
 
-        {/* --- TASK LIST --- */}
+        {/* TASK LIST */}
         <div>
           <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2">
             <h2 className="text-xl font-bold text-stone-700">Current Tasks</h2>
