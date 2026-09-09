@@ -10,15 +10,66 @@ export default function App() {
     tag: ''
   })
   const [editingId, setEditingId] = useState(null)
+  
+  // NEW: We check the browser's "backpack" to see if it was sorted last time!
+  const [isSorted, setIsSorted] = useState(() => {
+    return localStorage.getItem('isSorted') === 'true'
+  })
 
-  const fetchTasks = async () => {
+  // --- QUICKSORT ALGORITHM HELPERS ---
+  const getPriorityValue = (p) => (p === 'High' ? 3 : p === 'Medium' ? 2 : 1)
+
+  const partition = (arr, low, high) => {
+    // We strictly use the last/highest index as the pivot
+    const pivotValue = getPriorityValue(arr[high].priority)
+    let i = low - 1
+    
+    for (let j = low; j < high; j++) {
+      if (getPriorityValue(arr[j].priority) >= pivotValue) {
+        i++
+        // Swap elements
+        let temp = arr[i]
+        arr[i] = arr[j]
+        arr[j] = temp
+      }
+    }
+    // Place pivot in correct position
+    let temp = arr[i + 1]
+    arr[i + 1] = arr[high]
+    arr[high] = temp
+    
+    return i + 1
+  }
+
+  const quickSort = (arr, low, high) => {
+    if (low < high) {
+      const pivotIndex = partition(arr, low, high)
+      quickSort(arr, low, pivotIndex - 1)
+      quickSort(arr, pivotIndex + 1, high)
+    }
+  }
+
+  // --- FETCHING & SORTING LOGIC ---
+  const fetchTasks = async (overrideSort = null) => {
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
       .order('created_at', { ascending: false })
     
-    if (error) console.error("Error fetching tasks:", error)
-    else setTasks(data)
+    if (error) {
+      console.error("Error fetching tasks:", error)
+      return
+    }
+
+    // Decide if we should sort. Use override if provided, otherwise check state
+    const shouldSort = overrideSort !== null ? overrideSort : isSorted
+
+    // If true, intercept the data and run Quicksort before showing the user!
+    if (shouldSort && data.length > 0) {
+      quickSort(data, 0, data.length - 1)
+    }
+    
+    setTasks(data)
   }
 
   useEffect(() => {
@@ -26,8 +77,23 @@ export default function App() {
       await fetchTasks()
     }
     loadTasks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // --- BUTTON HANDLERS ---
+  const enableSort = () => {
+    setIsSorted(true)
+    localStorage.setItem('isSorted', 'true') // Put note in backpack
+    fetchTasks(true)
+  }
+
+  const disableSort = () => {
+    setIsSorted(false)
+    localStorage.setItem('isSorted', 'false') // Update note in backpack
+    fetchTasks(false)
+  }
+
+  // --- CRUD OPERATIONS ---
   const handleSubmit = async (e) => {
     e.preventDefault() 
     
@@ -42,9 +108,7 @@ export default function App() {
         })
         .eq('id', editingId)
 
-      if (error) {
-        console.error("Error updating task:", error)
-      } else {
+      if (!error) {
         setEditingId(null)
         setFormData({ title: '', due_date: '', priority: 'Low', tag: '' })
         fetchTasks()
@@ -54,9 +118,7 @@ export default function App() {
         .from('tasks')
         .insert([formData])
 
-      if (error) {
-        console.error("Error adding task:", error)
-      } else {
+      if (!error) {
         setFormData({ title: '', due_date: '', priority: 'Low', tag: '' })
         fetchTasks() 
       }
@@ -80,27 +142,18 @@ export default function App() {
   }
 
   const toggleDone = async (id, currentStatus) => {
-    const { error } = await supabase
-      .from('tasks')
-      .update({ is_done: !currentStatus })
-      .eq('id', id)
-
-    if (error) console.error("Error updating task:", error)
-    else fetchTasks()
+    const { error } = await supabase.from('tasks').update({ is_done: !currentStatus }).eq('id', id)
+    if (!error) fetchTasks()
   }
 
   const deleteTask = async (id) => {
     if (window.confirm("Are you sure you want to delete this task?")) {
-      const { error } = await supabase
-        .from('tasks')
-        .delete()
-        .eq('id', id)
-
-      if (error) console.error("Error deleting task:", error)
-      else fetchTasks()
+      const { error } = await supabase.from('tasks').delete().eq('id', id)
+      if (!error) fetchTasks()
     }
   }
 
+  // --- UI RENDERING ---
   return (
     <div className="min-h-screen bg-stone-100 p-8 font-sans text-stone-800">
       <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-lg border-t-8 border-up-maroon">
@@ -110,7 +163,7 @@ export default function App() {
         {/* --- ADD/EDIT FORM --- */}
         <form onSubmit={handleSubmit} className="mb-8 space-y-4 bg-stone-50 p-5 rounded-lg border border-stone-200 transition-all duration-300 hover:shadow-md">
           <h2 className="text-lg font-bold text-stone-700 border-b-2 border-stone-200 pb-2 flex items-center gap-2">
-            {editingId ? '✏️ Edit Task' : '✨ Add New Task'}
+            {editingId ? '✏️ Edit Task' : 'Add Your New Task'}
           </h2>
           
           <div>
@@ -182,7 +235,26 @@ export default function App() {
 
         {/* --- TASK LIST --- */}
         <div>
-          <h2 className="text-xl font-bold mb-4 border-b-2 border-stone-200 pb-2 text-stone-700">Current Tasks</h2>
+          <div className="flex justify-between items-center mb-4 border-b-2 border-stone-200 pb-2">
+            <h2 className="text-xl font-bold text-stone-700">Current Tasks</h2>
+            
+            {/* DYNAMIC SORT BUTTON */}
+            {isSorted ? (
+              <button 
+                onClick={disableSort}
+                className="text-sm bg-stone-500 text-white px-4 py-1.5 rounded-md font-bold transition-all duration-200 shadow-sm hover:bg-stone-600 hover:-translate-y-0.5"
+              >
+                Reset Sort
+              </button>
+            ) : (
+              <button 
+                onClick={enableSort}
+                className="text-sm bg-up-maroon text-white px-4 py-1.5 rounded-md font-bold transition-all duration-200 shadow-sm hover:bg-up-maroon-dark hover:-translate-y-0.5"
+              >
+                Sort by Priority
+              </button>
+            )}
+          </div>
           
           {tasks.length === 0 ? (
             <p className="text-stone-500 italic text-center py-8 bg-stone-50 rounded-lg border border-dashed border-stone-300">No tasks yet. Add one above!</p>
