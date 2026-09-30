@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import UpdatePassword from './pages/UpdatePassword'
+import ProfileView from './components/ProfileView'
 
 export default function App() {
   // Store the active user session object when someone logs in
@@ -16,8 +17,8 @@ export default function App() {
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
   // Control whether the sliding schedule calendar drawer is open or closed
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
-  // Control whether the quick notes scratchpad modal/drawer is open or closed
-  const [isNotesOpen, setIsNotesOpen] = useState(false)
+  // Control whether the app displays 'profile' or 'tasks' after login (defaults to profile)
+  const [currentView, setCurrentView] = useState('profile')
 
   // Hold the list of tasks fetched from the database
   const [tasks, setTasks] = useState([])
@@ -39,16 +40,6 @@ export default function App() {
 
   // Track the currently viewed month and year in the schedule calendar widget
   const [calendarDate, setCalendarDate] = useState(new Date())
-
-  // Scratchpad quick notes state
-  const [quickNotes, setQuickNotes] = useState(() => {
-    return localStorage.getItem('upbeat_scratchpad') || ''
-  })
-
-  // Save scratchpad notes to local storage whenever they change
-  useEffect(() => {
-    localStorage.setItem('upbeat_scratchpad', quickNotes)
-  }, [quickNotes])
 
   // Check Supabase immediately on startup to see if a valid session already exists in browser storage
   useEffect(() => {
@@ -244,14 +235,14 @@ export default function App() {
 
   if (!user) {
     if (authView === 'register') {
-      return <Register onRegisterSuccess={(newUser) => setUser(newUser)} switchToLogin={() => setAuthView('login')} />
+      return <Register onRegisterSuccess={(newUser) => { setUser(newUser); setCurrentView('profile'); }} switchToLogin={() => setAuthView('login')} />
     }
     if (authView === 'forgot') {
       return <ForgotPassword switchToLogin={() => setAuthView('login')} />
     }
     return (
       <Login 
-        onLoginSuccess={(loggedInUser) => setUser(loggedInUser)} 
+        onLoginSuccess={(loggedInUser) => { setUser(loggedInUser); setCurrentView('profile'); }} 
         switchToRegister={() => setAuthView('register')} 
         switchToForgot={() => setAuthView('forgot')}
       />
@@ -350,29 +341,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Click-Triggered Left Quick Notes Drawer */}
-      <div className={`fixed top-0 left-0 h-full w-80 bg-slate-900/95 backdrop-blur-2xl border-r border-slate-700/80 p-6 shadow-[20px_0_50px_rgba(0,0,0,0.8)] z-50 transform transition-transform duration-300 ease-out flex flex-col ${isNotesOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
-          <div>
-            <h2 className="text-lg font-black text-white">📝 Quick Notes</h2>
-            <p className="text-slate-400 text-xs">Jot down temporary snippets</p>
-          </div>
-          <button 
-            onClick={() => setIsNotesOpen(false)}
-            className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 hover:text-white transition-all flex items-center justify-center"
-          >
-            ✕
-          </button>
-        </div>
-        <textarea 
-          className="w-full flex-1 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-up-green resize-none placeholder-slate-600 shadow-inner font-mono"
-          placeholder="Type notes, code ideas, or links here..."
-          value={quickNotes}
-          onChange={(e) => setQuickNotes(e.target.value)}
-        ></textarea>
-        <p className="text-[10px] text-slate-500 mt-2 text-center">Auto-saved to browser storage</p>
-      </div>
-
       {/* Custom styled confirmation modal overlay for task deletion */}
       {taskToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-40 flex items-center justify-center p-4">
@@ -402,7 +370,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Clean Navigation Bar with Notes and Schedule buttons safely accessible */}
+      {/* Clean Navigation Bar with View Switcher buttons */}
       <nav className="w-full bg-slate-900/50 backdrop-blur-lg border-b border-slate-800 sticky top-0 z-30 px-6 py-4 flex justify-between items-center shadow-lg">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-up-maroon to-red-900 flex items-center justify-center font-black text-white shadow-lg">
@@ -411,15 +379,18 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-3">
-          <div className="text-sm font-bold text-slate-300 hidden md:block mr-2">
-            Hello, <span className="text-up-green">{user.user_metadata?.display_name || user.email}</span>
-          </div>
+          <button 
+            onClick={() => setCurrentView('profile')}
+            className={`px-4 py-2 border rounded-xl text-sm font-bold transition-all shadow-sm ${currentView === 'profile' ? 'bg-up-green text-white border-up-green' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+          >
+            ⚙️ Profile
+          </button>
 
           <button 
-            onClick={() => setIsNotesOpen(!isNotesOpen)}
-            className="px-4 py-2 bg-slate-800 border border-slate-700 text-slate-200 font-bold rounded-xl text-sm hover:bg-slate-700 hover:text-white transition-all shadow-sm flex items-center gap-1.5"
+            onClick={() => setCurrentView('tasks')}
+            className={`px-4 py-2 border rounded-xl text-sm font-bold transition-all shadow-sm ${currentView === 'tasks' ? 'bg-up-green text-white border-up-green' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
           >
-            📝 Notes
+            📋 Tasks Workspace
           </button>
 
           <button 
@@ -438,196 +409,206 @@ export default function App() {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto pt-10 px-4 relative z-10">
-        
-        <div className="w-full bg-slate-900/60 backdrop-blur-xl p-6 sm:p-10 rounded-3xl shadow-2xl border border-slate-700/50">
+      {/* Conditional Rendering based on whether user is viewing Profile or Tasks */}
+      {currentView === 'profile' ? (
+        <ProfileView 
+          user={user} 
+          onUserUpdated={(updatedUser) => setUser(updatedUser)} 
+          goToTasks={() => setCurrentView('tasks')} 
+        />
+      ) : (
+        <div className="max-w-4xl mx-auto pt-10 px-4 relative z-10">
           
-          <form 
-            onSubmit={handleSubmit} 
-            className={`mb-10 space-y-5 p-6 rounded-2xl border transition-all duration-500 ease-out ${
-              editingId 
-                ? 'bg-slate-800/90 ring-2 ring-up-green/50 shadow-[0_0_30px_rgba(0,200,100,0.1)] scale-[1.02] relative z-20 border-up-green/30' 
-                : 'bg-slate-800/40 border-slate-700 shadow-lg hover:bg-slate-800/60'
-            }`}
-          >
-            <h2 className="text-xl font-extrabold text-slate-100 border-b-2 border-slate-700/60 pb-3 flex items-center gap-2">
-              {editingId ? 'Edit Task' : 'Add a New Task'}
-            </h2>
+          <div className="w-full bg-slate-900/60 backdrop-blur-xl p-6 sm:p-10 rounded-3xl shadow-2xl border border-slate-700/50">
             
-            <div>
-              <label className="block text-sm font-bold mb-1.5 text-slate-400">Task Title *</label>
-              <input 
-                type="text" 
-                required
-                className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600" 
-                placeholder="What needs to be done?"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <form 
+              onSubmit={handleSubmit} 
+              className={`mb-10 space-y-5 p-6 rounded-2xl border transition-all duration-500 ease-out ${
+                editingId 
+                  ? 'bg-slate-800/90 ring-2 ring-up-green/50 shadow-[0_0_30px_rgba(0,200,100,0.1)] scale-[1.02] relative z-20 border-up-green/30' 
+                  : 'bg-slate-800/40 border-slate-700 shadow-lg hover:bg-slate-800/60'
+              }`}
+            >
+              <h2 className="text-xl font-extrabold text-slate-100 border-b-2 border-slate-700/60 pb-3 flex items-center gap-2">
+                {editingId ? 'Edit Task' : 'Add a New Task'}
+              </h2>
+              
               <div>
-                <label className="block text-sm font-bold mb-1.5 text-slate-400">Due Date</label>
+                <label className="block text-sm font-bold mb-1.5 text-slate-400">Task Title *</label>
                 <input 
-                  type="date" 
-                  className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner [color-scheme:dark]"
-                  value={formData.due_date}
-                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  type="text" 
+                  required
+                  className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600" 
+                  placeholder="What needs to be done?"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 />
               </div>
-              
-              <div>
-                <label className="block text-sm font-bold mb-1.5 text-slate-400">Priority</label>
-                <select 
-                  className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner font-semibold"
-                  value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                </select>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div>
+                  <label className="block text-sm font-bold mb-1.5 text-slate-400">Due Date</label>
+                  <input 
+                    type="date" 
+                    className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner [color-scheme:dark]"
+                    value={formData.due_date}
+                    onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold mb-1.5 text-slate-400">Priority</label>
+                  <select 
+                    className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner font-semibold"
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold mb-1.5 text-slate-400">Category Tag</label>
+                  <select 
+                    className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner font-semibold"
+                    value={formData.tag}
+                    onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
+                  >
+                    <option value="School">School</option>
+                    <option value="Personal">Personal</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-bold mb-1.5 text-slate-400">Category Tag</label>
-                <select 
-                  className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-maroon focus:bg-slate-900 transition-all shadow-inner font-semibold"
-                  value={formData.tag}
-                  onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
-                >
-                  <option value="School">School</option>
-                  <option value="Personal">Personal</option>
-                  <option value="Others">Others</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex space-x-4 pt-4">
-              <button 
-                type="submit" 
-                className={`flex-1 text-white font-black py-3.5 rounded-xl shadow-lg transition-all duration-300 hover:-translate-y-0.5 ${editingId ? 'bg-gradient-to-r from-up-green to-emerald-800 hover:shadow-emerald-500/20' : 'bg-gradient-to-r from-up-maroon to-red-950 hover:shadow-red-900/20'}`}
-              >
-                {editingId ? 'Update Task' : 'Add Task'}
-              </button>
-              
-              {editingId && (
+              <div className="flex space-x-4 pt-4">
                 <button 
-                  type="button" 
-                  onClick={cancelEdit}
-                  className="flex-1 bg-slate-800 border border-slate-600 text-slate-300 font-black py-3.5 rounded-xl hover:bg-slate-700 hover:text-white transition-all duration-300 shadow-md hover:-translate-y-0.5"
+                  type="submit" 
+                  className={`flex-1 text-white font-black py-3.5 rounded-xl shadow-lg transition-all duration-300 hover:-translate-y-0.5 ${editingId ? 'bg-gradient-to-r from-up-green to-emerald-800 hover:shadow-emerald-500/20' : 'bg-gradient-to-r from-up-maroon to-red-950 hover:shadow-red-900/20'}`}
                 >
-                  Cancel
+                  {editingId ? 'Update Task' : 'Add Task'}
                 </button>
+                
+                {editingId && (
+                  <button 
+                    type="button" 
+                    onClick={cancelEdit}
+                    className="flex-1 bg-slate-800 border border-slate-600 text-slate-300 font-black py-3.5 rounded-xl hover:bg-slate-700 hover:text-white transition-all duration-300 shadow-md hover:-translate-y-0.5"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <div className={`transition-all duration-500 ${editingId ? 'opacity-20 pointer-events-none grayscale blur-[2px]' : 'opacity-100'}`}>
+              
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b-2 border-slate-700/60 pb-4 gap-4">
+                <h2 className="text-2xl font-black text-slate-100">Current Tasks</h2>
+                
+                <div className="flex space-x-3 w-full sm:w-auto">
+                  <select 
+                    value={filterTag} 
+                    onChange={(e) => setFilterTag(e.target.value)}
+                    className="flex-1 sm:flex-none text-sm bg-slate-800 border border-slate-600 rounded-lg p-2.5 focus:ring-2 focus:ring-up-maroon font-bold text-slate-200 shadow-sm"
+                  >
+                    <option value="All">Filter: All</option>
+                    <option value="School">School</option>
+                    <option value="Personal">Personal</option>
+                    <option value="Others">Others</option>
+                  </select>
+
+                  <select 
+                    value={sortBy} 
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="flex-1 sm:flex-none text-sm bg-slate-800 border border-slate-600 rounded-lg p-2.5 focus:ring-2 focus:ring-up-maroon font-bold text-slate-200 shadow-sm"
+                  >
+                    <option value="created_at">Sort: Newest First</option>
+                    <option value="priority">Sort: Priority</option>
+                    <option value="due_date">Sort: Due Date</option>
+                    <option value="tag">Sort: Category</option>
+                  </select>
+                </div>
+              </div>
+              
+              {displayedTasks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 bg-slate-800/30 rounded-2xl border border-dashed border-slate-700">
+                  <span className="text-4xl mb-3 opacity-50">🍃</span>
+                  <p className="text-slate-400 font-bold text-lg">No tasks found.</p>
+                  <p className="text-slate-500 text-sm">Add a new task above to get started.</p>
+                </div>
+              ) : (
+                <ul className="space-y-4">
+                  {displayedTasks.map((task) => (
+                    <li 
+                      key={task.id} 
+                    className={`p-5 rounded-2xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-xl border ${
+                        task.is_done 
+                          ? 'bg-slate-900/50 border-slate-800 opacity-60' 
+                          : 'bg-slate-800/80 border-slate-700 shadow-md border-l-4 border-l-up-maroon'
+                      }`}
+                    >
+                      
+                      <div className={`flex-1 ${task.is_done ? 'line-through text-slate-500' : ''}`}>
+                        <h3 className="font-extrabold text-xl text-slate-100 mb-2">{task.title}</h3>
+                        <div className="text-sm flex flex-wrap gap-2">
+                          {task.due_date && (
+                            <span className="px-3 py-1 bg-slate-900 rounded-lg text-slate-400 font-bold flex items-center gap-1.5 border border-slate-800">
+                              📅 {task.due_date.split('T')[0]}
+                            </span>
+                          )}
+                          {task.priority && (
+                            <span className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center shadow-sm border ${
+                              task.priority === 'High' ? 'bg-red-950/40 border-red-900/50 text-red-400' : 
+                              task.priority === 'Medium' ? 'bg-yellow-950/40 border-yellow-900/50 text-yellow-500' : 
+                              'bg-slate-900 border-slate-800 text-slate-400'
+                            }`}>
+                              {task.priority} Priority
+                            </span>
+                          )}
+                          {task.tag && (
+                            <span className="px-3 py-1 bg-up-green/10 text-up-green rounded-lg text-xs font-black shadow-sm uppercase tracking-wider border border-up-green/20">
+                              #{task.tag}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex space-x-2 w-full md:w-auto mt-2 md:mt-0">
+                        <button 
+                          onClick={() => toggleDone(task.id, task.is_done)}
+                          className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm transition-all duration-200 shadow-sm hover:-translate-y-1 ${task.is_done ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-up-green/90 text-white hover:bg-up-green shadow-emerald-500/20 hover:shadow-lg'}`}
+                        >
+                          {task.is_done ? 'Undo' : 'Done'}
+                        </button>
+                        
+                        <button 
+                          onClick={() => startEdit(task)}
+                          disabled={task.is_done}
+                          className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm transition-all duration-200 shadow-sm ${task.is_done ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700' : 'bg-slate-200 text-slate-900 hover:bg-white hover:-translate-y-1 hover:shadow-lg'}`}
+                        >
+                          Edit
+                        </button>
+
+                        <button 
+                          onClick={() => confirmDelete(task)}
+                          className="flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm bg-red-950/30 text-red-500 hover:bg-red-600 hover:text-white border border-red-900/30 hover:border-red-600 transition-all duration-200 shadow-sm hover:-translate-y-1 hover:shadow-lg"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-          </form>
 
-          <div className={`transition-all duration-500 ${editingId ? 'opacity-20 pointer-events-none grayscale blur-[2px]' : 'opacity-100'}`}>
-            
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b-2 border-slate-700/60 pb-4 gap-4">
-              <h2 className="text-2xl font-black text-slate-100">Current Tasks</h2>
-              
-              <div className="flex space-x-3 w-full sm:w-auto">
-                <select 
-                  value={filterTag} 
-                  onChange={(e) => setFilterTag(e.target.value)}
-                  className="flex-1 sm:flex-none text-sm bg-slate-800 border border-slate-600 rounded-lg p-2.5 focus:ring-2 focus:ring-up-maroon font-bold text-slate-200 shadow-sm"
-                >
-                  <option value="All">Filter: All</option>
-                  <option value="School">School</option>
-                  <option value="Personal">Personal</option>
-                  <option value="Others">Others</option>
-                </select>
-
-                <select 
-                  value={sortBy} 
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="flex-1 sm:flex-none text-sm bg-slate-800 border border-slate-600 rounded-lg p-2.5 focus:ring-2 focus:ring-up-maroon font-bold text-slate-200 shadow-sm"
-                >
-                  <option value="created_at">Sort: Newest First</option>
-                  <option value="priority">Sort: Priority</option>
-                  <option value="due_date">Sort: Due Date</option>
-                  <option value="tag">Sort: Category</option>
-                </select>
-              </div>
-            </div>
-            
-            {displayedTasks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 bg-slate-800/30 rounded-2xl border border-dashed border-slate-700">
-                <span className="text-4xl mb-3 opacity-50">🍃</span>
-                <p className="text-slate-400 font-bold text-lg">No tasks found.</p>
-                <p className="text-slate-500 text-sm">Add a new task above to get started.</p>
-              </div>
-            ) : (
-              <ul className="space-y-4">
-                {displayedTasks.map((task) => (
-                  <li 
-                    key={task.id} 
-                    className={`p-5 rounded-2xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-xl border ${
-                      task.is_done 
-                        ? 'bg-slate-900/50 border-slate-800 opacity-60' 
-                        : 'bg-slate-800/80 border-slate-700 shadow-md border-l-4 border-l-up-maroon'
-                    }`}
-                  >
-                    
-                    <div className={`flex-1 ${task.is_done ? 'line-through text-slate-500' : ''}`}>
-                      <h3 className="font-extrabold text-xl text-slate-100 mb-2">{task.title}</h3>
-                      <div className="text-sm flex flex-wrap gap-2">
-                        {task.due_date && (
-                          <span className="px-3 py-1 bg-slate-900 rounded-lg text-slate-400 font-bold flex items-center gap-1.5 border border-slate-800">
-                            📅 {task.due_date.split('T')[0]}
-                          </span>
-                        )}
-                        {task.priority && (
-                          <span className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center shadow-sm border ${
-                            task.priority === 'High' ? 'bg-red-950/40 border-red-900/50 text-red-400' : 
-                            task.priority === 'Medium' ? 'bg-yellow-950/40 border-yellow-900/50 text-yellow-500' : 
-                            'bg-slate-900 border-slate-800 text-slate-400'
-                          }`}>
-                            {task.priority} Priority
-                          </span>
-                        )}
-                        {task.tag && (
-                          <span className="px-3 py-1 bg-up-green/10 text-up-green rounded-lg text-xs font-black shadow-sm uppercase tracking-wider border border-up-green/20">
-                            #{task.tag}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex space-x-2 w-full md:w-auto mt-2 md:mt-0">
-                      <button 
-                        onClick={() => toggleDone(task.id, task.is_done)}
-                        className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm transition-all duration-200 shadow-sm hover:-translate-y-1 ${task.is_done ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-up-green/90 text-white hover:bg-up-green shadow-emerald-500/20 hover:shadow-lg'}`}
-                      >
-                        {task.is_done ? 'Undo' : 'Done'}
-                      </button>
-                      
-                      <button 
-                        onClick={() => startEdit(task)}
-                        disabled={task.is_done}
-                        className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm transition-all duration-200 shadow-sm ${task.is_done ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700' : 'bg-slate-200 text-slate-900 hover:bg-white hover:-translate-y-1 hover:shadow-lg'}`}
-                      >
-                        Edit
-                      </button>
-
-                      <button 
-                        onClick={() => confirmDelete(task)}
-                        className="flex-1 md:flex-none px-5 py-2.5 rounded-xl font-black text-sm bg-red-950/30 text-red-500 hover:bg-red-600 hover:text-white border border-red-900/30 hover:border-red-600 transition-all duration-200 shadow-sm hover:-translate-y-1 hover:shadow-lg"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
-
         </div>
-      </div>
+      )}
+
     </div>
   )
 }
