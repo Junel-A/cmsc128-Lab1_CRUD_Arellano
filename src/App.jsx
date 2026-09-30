@@ -210,7 +210,7 @@ export default function App() {
   const prevMonth = () => setCalendarDate(new Date(year, month - 1, 1))
   const nextMonth = () => setCalendarDate(new Date(year, month + 1, 1))
 
-  // Display a temporary loading message while checking browser storage for an existing session
+  // Show a temporary loading message while checking browser storage for an existing session
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center font-sans">
