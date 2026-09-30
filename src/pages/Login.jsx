@@ -1,35 +1,35 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
-export default function Login({ onLoginSuccess, switchToRegister }) {
-  // Track what the user types into the email field
+export default function Login({ onLoginSuccess, switchToRegister, switchToForgot }) {
+  // Keep track of whatever text string the user enters into the email input box
   const [email, setEmail] = useState('')
-  // Track what the user types into the password field
+  // Keep track of the password characters typed by the user
   const [password, setPassword] = useState('')
-  // Keep track of whether the application is currently waiting on the server response
+  // Determine if the application is currently waiting on a network response from Supabase
   const [loading, setLoading] = useState(false)
-  // Store any error message to display if authentication fails
+  // Store any error feedback text returned by the server if authentication fails
   const [errorMessage, setErrorMessage] = useState('')
 
-  // Send the credentials to Supabase and check if they match an existing account
+  // Send the user credentials to Supabase to verify the login attempt
   const handleLogin = async (e) => {
-    // Prevent the browser from refreshing the page automatically on submit
+    // Stop the web browser from performing a full page reload on form submission
     e.preventDefault()
     setLoading(true)
     setErrorMessage('')
 
-    // Ask Supabase to sign in with these specific credentials
+    // Authenticate using Supabase built in password method
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
     })
 
-    // If Supabase rejects the login attempt, grab the error text and stop loading
+    // If Supabase rejects the login credentials, capture the error message and unlock the form
     if (error) {
       setErrorMessage(error.message)
       setLoading(false)
     } else {
-      // If login is successful, reset the loading state and pass the user data forward
+      // If successful, stop loading and pass the authenticated user data upward
       setLoading(false)
       onLoginSuccess(data.user)
     }
@@ -82,6 +82,16 @@ export default function Login({ onLoginSuccess, switchToRegister }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+            {/* Moved cleanly below the password input box */}
+            <div className="flex justify-end mt-1.5">
+              <button 
+                type="button" 
+                onClick={switchToForgot}
+                className="text-xs font-bold text-up-green hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
           </div>
 
           <button 
