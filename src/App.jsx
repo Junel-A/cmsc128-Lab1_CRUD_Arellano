@@ -7,41 +7,42 @@ import UpdatePassword from './pages/UpdatePassword'
 import ProfileView from './components/ProfileView'
 
 export default function App() {
-  // Store the active user session object when someone logs in
+  // Session and view states
   const [user, setUser] = useState(null)
-  // Track whether the application is still checking storage for an existing session
   const [authLoading, setAuthLoading] = useState(true)
-  // Control which authentication screen is currently displayed on the screen
   const [authView, setAuthView] = useState('login')
-  // Track whether the app is in password recovery mode
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
-  // Control whether the sliding schedule calendar drawer is open or closed
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
-  // Control whether the app displays 'profile' or 'tasks' after login (defaults to profile)
   const [currentView, setCurrentView] = useState('profile')
 
-  // Hold the list of tasks fetched from the database
+  // --- act3: collaborative lists & member management states ---
+  const [lists, setLists] = useState([])
+  const [activeListId, setActiveListId] = useState(null)
+  const [showNewListModal, setShowNewListModal] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [isCollaborative, setIsCollaborative] = useState(false)
+  
+  // act3: modal state for adding members to shared lists
+  const [showMemberModal, setShowMemberModal] = useState(false)
+  const [collaboratorUserId, setCollaboratorUserId] = useState('')
+  const [memberFeedback, setMemberFeedback] = useState({ type: '', message: '' })
+  // -----------------------------------------------------------
+
+  // Task form and filtering states
   const [tasks, setTasks] = useState([])
-  // Hold whatever values the user types into the task input form
   const [formData, setFormData] = useState({
     title: '',
     due_date: '',
     priority: 'Low',
     tag: 'School' 
   })
-  // Track the unique identifier of a task if the user clicks edit
   const [editingId, setEditingId] = useState(null)
-  // Store the current sorting parameter chosen by the user from the dropdown
   const [sortBy, setSortBy] = useState('created_at')
-  // Store the current category filter selected by the user
   const [filterTag, setFilterTag] = useState('All')
-  // Track the task object currently pending deletion for the custom confirmation modal
   const [taskToDelete, setTaskToDelete] = useState(null)
-
-  // Track the currently viewed month and year in the schedule calendar widget
   const [calendarDate, setCalendarDate] = useState(new Date())
 
-  // Check Supabase immediately on startup to see if a valid session already exists in browser storage
+  // Check active session on initial load
   useEffect(() => {
     const checkUserSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
@@ -51,7 +52,7 @@ export default function App() {
 
     checkUserSession()
 
-    // Listen continuously for any login or logout events triggered anywhere in the application
+    // Listen for auth state changes (login, logout, recovery)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsPasswordRecovery(true)
@@ -64,36 +65,75 @@ export default function App() {
     }
   }, [])
 
-  // Talk to the database and pull all task records ordered by creation date
+  // --- act3: fetch lists accessible to the logged-in user ---
+  const fetchLists = async () => {
+    const { data, error } = await supabase
+      .from('lists')
+      .select('*')
+      .order('created_at', { ascending: true })
+    
+    if (error) {
+      console.error("Error fetching lists:", error)
+      return
+    }
+
+    if (data && data.length > 0) {
+      setLists(data)
+      if (!activeListId || !data.some(l => l.id === activeListId)) {
+        setActiveListId(data[0].id)
+      }
+    } else {
+      // Fallback: auto-create a default personal list if none exist yet
+      const { data: newList, error: createError } = await supabase
+        .from('lists')
+        .insert([{ title: 'My Personal List', owner_id: user.id, is_collaborative: false }])
+        .select()
+      
+      if (!createError && newList) {
+        setLists(newList)
+        setActiveListId(newList[0].id)
+      }
+    }
+  }
+
+  // act3: fetch tasks filtered strictly by the currently selected list id
   const fetchTasks = async () => {
+    if (!activeListId) return
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
+      .eq('list_id', activeListId)
       .order('created_at', { ascending: false })
     
     if (error) {
       console.error("Error fetching tasks:", error)
       return
     }
-    setTasks(data)
+    setTasks(data || [])
   }
 
-  // Automatically trigger a task fetch the moment a valid user session is detected
+  // Trigger list loading when session is ready
   useEffect(() => {
-    const loadUserTasks = async () => {
-      if (user && !isPasswordRecovery) {
-        await fetchTasks()
-      }
+    if (user && !isPasswordRecovery) {
+      fetchLists()
     }
-    loadUserTasks()
   }, [user, isPasswordRecovery])
 
-  // Handle saving form data either as a new database insertion or an existing record update
+  // Re-fetch tasks whenever the user switches active lists
+  useEffect(() => {
+    if (activeListId) {
+      fetchTasks()
+    }
+  }, [activeListId])
+
+  // Handle creating or updating tasks
   const handleSubmit = async (e) => {
-    // Prevent the default browser reload action
     e.preventDefault() 
+    if (!activeListId) {
+      alert("Please select or create a list first.")
+      return
+    }
     
-    // If an editing identifier exists, perform an update operation on that specific row
     if (editingId) {
       const { error } = await supabase
         .from('tasks')
@@ -111,7 +151,7 @@ export default function App() {
         fetchTasks()
       }
     } else {
-      // If no editing identifier exists, insert a brand new task row linked to the logged-in user
+      // act3: insert task bound to the active list id
       const { error } = await supabase
         .from('tasks')
         .insert([{
@@ -119,7 +159,7 @@ export default function App() {
           due_date: formData.due_date || null,
           priority: formData.priority,
           tag: formData.tag,
-          user_id: user.id
+          list_id: activeListId
         }])
 
       if (!error) {
@@ -129,7 +169,54 @@ export default function App() {
     }
   }
 
-  // Copy existing task attributes into the form state so the user can modify them
+  // --- act3: list creation handler ---
+  const handleCreateList = async (e) => {
+    e.preventDefault()
+    if (!newListName.trim()) return
+
+    const { data, error } = await supabase
+      .from('lists')
+      .insert([{
+        title: newListName.trim(),
+        owner_id: user.id,
+        is_collaborative: isCollaborative
+      }])
+      .select()
+
+    if (error) {
+      alert("Error creating list: " + error.message)
+    } else if (data && data.length > 0) {
+      setNewListName('')
+      setIsCollaborative(false)
+      setShowNewListModal(false)
+      await fetchLists()
+      setActiveListId(data[0].id)
+    }
+  }
+
+  // --- act3: add member handler for collaborative lists ---
+  const handleAddMember = async (e) => {
+    e.preventDefault()
+    setMemberFeedback({ type: '', message: '' })
+
+    if (!collaboratorUserId.trim()) return
+
+    const { error } = await supabase
+      .from('list_members')
+      .insert([{
+        list_id: activeListId,
+        user_id: collaboratorUserId.trim()
+      }])
+
+    if (error) {
+      setMemberFeedback({ type: 'error', message: error.message })
+    } else {
+      setMemberFeedback({ type: 'success', message: 'Collaborator added successfully!' })
+      setCollaboratorUserId('')
+    }
+  }
+
+  // Set up task fields for editing
   const startEdit = (task) => {
     setEditingId(task.id)
     setFormData({
@@ -141,24 +228,21 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // Reset the form state and clear out the editing identifier if the user cancels
   const cancelEdit = () => {
     setEditingId(null)
     setFormData({ title: '', due_date: '', priority: 'Low', tag: 'School' })
   }
 
-  // Flip the completion status of a task row in the database
+  // Toggle task completion status
   const toggleDone = async (id, currentStatus) => {
     const { error } = await supabase.from('tasks').update({ is_done: !currentStatus }).eq('id', id)
     if (!error) fetchTasks()
   }
 
-  // Open the custom styled confirmation modal before deleting a task
   const confirmDelete = (task) => {
     setTaskToDelete(task)
   }
 
-  // Execute the permanent deletion of the task after user confirmation in the custom modal
   const executeDelete = async () => {
     if (!taskToDelete) return
     const { error } = await supabase.from('tasks').delete().eq('id', taskToDelete.id)
@@ -168,20 +252,17 @@ export default function App() {
     }
   }
 
-  // Terminate the active user session and clear out local session data
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setUser(null)
     setIsPasswordRecovery(false)
   }
 
-  // Convert text priorities into numeric values so the sorting logic can rank them properly
+  // Sorting and filtering logic
   const getPriorityValue = (p) => (p === 'High' ? 3 : p === 'Medium' ? 2 : 1)
 
-  // Filter tasks based on whatever category tag is currently selected in the dropdown
   let displayedTasks = tasks.filter(task => filterTag === 'All' || task.tag === filterTag)
 
-  // Sort the filtered task list based on the chosen sorting option
   displayedTasks = [...displayedTasks].sort((a, b) => {
     if (sortBy === 'priority') {
       return getPriorityValue(b.priority) - getPriorityValue(a.priority)
@@ -197,7 +278,7 @@ export default function App() {
     return 0 
   })
 
-  // Calendar calculations for the sliding schedule widget
+  // Calendar setup
   const year = calendarDate.getFullYear()
   const month = calendarDate.getMonth()
   const monthNames = [
@@ -210,7 +291,6 @@ export default function App() {
   const prevMonth = () => setCalendarDate(new Date(year, month - 1, 1))
   const nextMonth = () => setCalendarDate(new Date(year, month + 1, 1))
 
-  // Show a temporary loading message while checking browser storage for an existing session
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center font-sans">
@@ -219,7 +299,6 @@ export default function App() {
     )
   }
 
-  // If the user clicked a password recovery link, render the update password screen
   if (isPasswordRecovery) {
     return (
       <UpdatePassword 
@@ -249,14 +328,16 @@ export default function App() {
     )
   }
 
+  const activeList = lists.find(l => l.id === activeListId)
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans relative overflow-hidden pb-12">
       
-      {/* Background glowing effects to make the layout feel more dynamic */}
+      {/* Background glow effects */}
       <div className="absolute top-0 right-0 -mr-32 -mt-32 w-[600px] h-[600px] rounded-full bg-up-maroon/10 blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-0 left-0 -ml-32 -mb-32 w-[600px] h-[600px] rounded-full bg-up-green/10 blur-[120px] pointer-events-none"></div>
 
-      {/* Click-Triggered Right Schedule Calendar Drawer */}
+      {/* Calendar Drawer */}
       <div className={`fixed top-0 right-0 h-full w-96 bg-slate-900/95 backdrop-blur-2xl border-l border-slate-700/80 p-6 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] z-50 transform transition-transform duration-300 ease-out flex flex-col overflow-y-auto ${isCalendarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
           <div>
@@ -271,7 +352,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* Month Navigation Controls */}
         <div className="flex justify-between items-center mb-4 bg-slate-950/50 p-2.5 rounded-2xl border border-slate-800">
           <button 
             onClick={prevMonth}
@@ -290,7 +370,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* Days of the Week Header */}
         <div className="grid grid-cols-7 gap-1 text-center mb-2">
           {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
             <div key={day} className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
@@ -299,7 +378,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Calendar Days Grid */}
         <div className="grid grid-cols-7 gap-1.5 flex-1 pb-6">
           {Array.from({ length: firstDayIndex }).map((_, index) => (
             <div key={`empty-${index}`} className="h-20 bg-slate-950/20 rounded-xl border border-transparent opacity-30"></div>
@@ -341,7 +419,111 @@ export default function App() {
         </div>
       </div>
 
-      {/* Custom styled confirmation modal overlay for task deletion */}
+      {/* act3: modal popup for creating new personal or collaborative lists */}
+      {showNewListModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 p-6 rounded-3xl shadow-2xl">
+            <h3 className="text-xl font-black text-white mb-4">Create New To-Do List</h3>
+            <form onSubmit={handleCreateList} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">List Title</label>
+                <input 
+                  type="text"
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-100 text-sm focus:ring-2 focus:ring-up-green"
+                  placeholder="e.g., Group Project / Personal Tasks"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input 
+                  type="checkbox"
+                  id="collabCheck"
+                  checked={isCollaborative}
+                  onChange={(e) => setIsCollaborative(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-up-green focus:ring-up-green"
+                />
+                <label htmlFor="collabCheck" className="text-xs font-bold text-slate-300">
+                  Make this a Collaborative List (shareable with others)
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => setShowNewListModal(false)}
+                  className="flex-1 bg-slate-800 text-slate-300 font-bold py-3 rounded-xl text-sm hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 bg-up-green text-white font-bold py-3 rounded-xl text-sm hover:bg-emerald-700 shadow-lg"
+                >
+                  Create List
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* act3: modal popup for managing/adding members to a shared list */}
+      {showMemberModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 p-6 rounded-3xl shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-black text-white">👥 Manage Collaborators</h3>
+              <button onClick={() => setShowMemberModal(false)} className="text-slate-400 font-bold hover:text-white">✕</button>
+            </div>
+            <p className="text-slate-400 text-xs mb-4">
+              Add a user to <span className="text-white font-bold">"{activeList?.title}"</span> by entering their User UUID.
+            </p>
+
+            {memberFeedback.message && (
+              <div className={`mb-4 p-3 rounded-xl text-xs font-semibold border ${
+                memberFeedback.type === 'success' ? 'bg-emerald-950/50 border-emerald-900 text-emerald-400' : 'bg-red-950/50 border-red-900 text-red-400'
+              }`}>
+                {memberFeedback.message}
+              </div>
+            )}
+
+            <form onSubmit={handleAddMember} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Collaborator User UUID</label>
+                <input 
+                  type="text"
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-100 text-sm focus:ring-2 focus:ring-up-green"
+                  placeholder="Paste user UUID here"
+                  value={collaboratorUserId}
+                  onChange={(e) => setCollaboratorUserId(e.target.value)}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => setShowMemberModal(false)}
+                  className="flex-1 bg-slate-800 text-slate-300 font-bold py-3 rounded-xl text-sm hover:bg-slate-700"
+                >
+                  Close
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 bg-up-green text-white font-bold py-3 rounded-xl text-sm hover:bg-emerald-700 shadow-lg"
+                >
+                  Add Member
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Task deletion confirmation modal */}
       {taskToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-40 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-slate-900 border border-slate-700/80 p-6 rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -370,7 +552,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Clean Navigation Bar with View Switcher buttons */}
+      {/* Navigation bar */}
       <nav className="w-full bg-slate-900/50 backdrop-blur-lg border-b border-slate-800 sticky top-0 z-30 px-6 py-4 flex justify-between items-center shadow-lg">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-up-maroon to-red-900 flex items-center justify-center font-black text-white shadow-lg">
@@ -409,7 +591,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Conditional Rendering based on whether user is viewing Profile or Tasks */}
+      {/* View router */}
       {currentView === 'profile' ? (
         <ProfileView 
           user={user} 
@@ -419,6 +601,43 @@ export default function App() {
       ) : (
         <div className="max-w-4xl mx-auto pt-10 px-4 relative z-10">
           
+          {/* act3: list switcher and action buttons bar */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 bg-slate-900/80 p-4 rounded-2xl border border-slate-800 shadow-lg">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-wider">Lists:</span>
+              {lists.map(list => (
+                <button
+                  key={list.id}
+                  onClick={() => setActiveListId(list.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    activeListId === list.id 
+                      ? 'bg-up-maroon text-white shadow-lg shadow-up-maroon/20' 
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {list.is_collaborative ? '👥 ' : '📁 '} {list.title}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {activeList?.is_collaborative && activeList?.owner_id === user.id && (
+                <button
+                  onClick={() => setShowMemberModal(true)}
+                  className="px-3 py-2 bg-slate-800 border border-slate-700 text-slate-200 text-xs font-black rounded-xl hover:bg-slate-700 transition-all"
+                >
+                  👥 Add Member
+                </button>
+              )}
+              <button
+                onClick={() => setShowNewListModal(true)}
+                className="px-4 py-2 bg-up-green/20 border border-up-green/40 text-up-green text-xs font-black rounded-xl hover:bg-up-green hover:text-white transition-all"
+              >
+                + New List
+              </button>
+            </div>
+          </div>
+
           <div className="w-full bg-slate-900/60 backdrop-blur-xl p-6 sm:p-10 rounded-3xl shadow-2xl border border-slate-700/50">
             
             <form 
@@ -429,8 +648,11 @@ export default function App() {
                   : 'bg-slate-800/40 border-slate-700 shadow-lg hover:bg-slate-800/60'
               }`}
             >
-              <h2 className="text-xl font-extrabold text-slate-100 border-b-2 border-slate-700/60 pb-3 flex items-center gap-2">
-                {editingId ? 'Edit Task' : 'Add a New Task'}
+              <h2 className="text-xl font-extrabold text-slate-100 border-b-2 border-slate-700/60 pb-3 flex items-center justify-between">
+                <span>{editingId ? 'Edit Task' : 'Add a New Task'}</span>
+                <span className="text-xs font-bold text-up-green bg-up-green/10 px-3 py-1 rounded-lg border border-up-green/20">
+                  Target List: {activeList?.title || 'None'}
+                </span>
               </h2>
               
               <div>
@@ -536,7 +758,7 @@ export default function App() {
               {displayedTasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 bg-slate-800/30 rounded-2xl border border-dashed border-slate-700">
                   <span className="text-4xl mb-3 opacity-50">🍃</span>
-                  <p className="text-slate-400 font-bold text-lg">No tasks found.</p>
+                  <p className="text-slate-400 font-bold text-lg">No tasks found in this list.</p>
                   <p className="text-slate-500 text-sm">Add a new task above to get started.</p>
                 </div>
               ) : (
