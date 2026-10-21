@@ -2,126 +2,104 @@ import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function Register({ onRegisterSuccess, switchToLogin }) {
-  // Track what the user types into the display name field
-  const [displayName, setDisplayName] = useState('')
-  // Track what the user types into the email field
   const [email, setEmail] = useState('')
-  // Track what the user types into the password field
   const [password, setPassword] = useState('')
-  // Keep track of whether the application is currently waiting on the server response
+  const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
-  // Store any error message to display if registration fails
-  const [errorMessage, setErrorMessage] = useState('')
+  const [error, setError] = useState(null)
 
-  // Send the new account credentials to Supabase for creation
   const handleRegister = async (e) => {
-    // Prevent the browser from refreshing the page automatically on submit
     e.preventDefault()
     setLoading(true)
-    setErrorMessage('')
-
-    // Ask Supabase to sign up a new user with email, password, and custom metadata for the display name
+    setError(null)
+    
     const { data, error } = await supabase.auth.signUp({
-      email: email,
-      password: password,
-      options: {
-        data: {
-          display_name: displayName,
-        },
-      },
+      email,
+      password,
+      options: { data: { display_name: displayName } }
     })
 
-    // If Supabase rejects the registration attempt, grab the error text and stop loading
     if (error) {
-      setErrorMessage(error.message)
-      setLoading(false)
+      setError(error.message)
     } else {
-      setLoading(false)
-      onRegisterSuccess(data.user)
+      if (onRegisterSuccess && data?.user) {
+        onRegisterSuccess(data.user)
+      } else {
+        setError("Registration successful, but user data is missing. Please try logging in.")
+      }
     }
+    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex items-center justify-center p-4 relative overflow-hidden">
-      
-      {/* Background glowing effects to maintain the dark mode aesthetic */}
-      <div className="absolute top-0 right-0 -mr-32 -mt-32 w-[500px] h-[500px] rounded-full bg-up-maroon/10 blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-0 left-0 -ml-32 -mb-32 w-[500px] h-[500px] rounded-full bg-up-green/10 blur-[120px] pointer-events-none"></div>
-
-      <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-slate-700/50 relative z-10">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] selection:bg-blue-100 selection:text-blue-900 font-sans">
+      <div className="w-full max-w-md bg-white/90 backdrop-blur-xl border border-slate-200 p-8 sm:p-10 rounded-3xl shadow-2xl animate-in fade-in zoom-in-95 duration-500">
         
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-up-green to-emerald-800 flex items-center justify-center font-black text-white text-xl mx-auto shadow-lg mb-3">
-            +
-          </div>
-          <h1 className="text-3xl font-black tracking-tight text-white">Create Account</h1>
-          <p className="text-slate-400 text-sm mt-1">Set up your credentials to get started</p>
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-black text-white text-2xl mx-auto mb-6 shadow-lg shadow-indigo-500/20">
+          +
         </div>
-
-        {/* Conditionally display the error box if registration fails */}
-        {errorMessage && (
-          <div className="mb-6 p-4 bg-red-950/50 border border-red-900/50 rounded-xl text-red-400 text-sm font-semibold">
-            ⚠ {errorMessage}
+        
+        <h2 className="text-3xl font-black text-slate-900 text-center tracking-tight mb-2">Create Account</h2>
+        <p className="text-slate-500 text-center text-sm font-medium mb-8">Set up your credentials to get started</p>
+        
+        {error && (
+          <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold flex items-center gap-2">
+            ✖ {error}
           </div>
         )}
-
+        
         <form onSubmit={handleRegister} className="space-y-5">
           <div>
-            <label className="block text-sm font-bold mb-1.5 text-slate-400">Display Name</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Display Name</label>
             <input 
               type="text" 
               required
-              className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-green focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600"
-              placeholder="Junel Arellano"
+              placeholder="e.g. Jane Doe"
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-sm font-medium placeholder-slate-400"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-bold mb-1.5 text-slate-400">Email Address</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Email Address</label>
             <input 
               type="email" 
               required
-              className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-green focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600"
               placeholder="name@example.com"
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-sm font-medium placeholder-slate-400"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
-
+          
           <div>
-            <label className="block text-sm font-bold mb-1.5 text-slate-400">Password</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Password</label>
             <input 
               type="password" 
               required
-              className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-green focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600"
               placeholder="••••••••"
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-sm font-medium placeholder-slate-400"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-
+          
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-gradient-to-r from-up-green to-emerald-800 text-white font-black py-3.5 rounded-xl shadow-lg hover:shadow-emerald-500/20 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold py-4 rounded-xl shadow-md hover:shadow-lg hover:shadow-indigo-500/20 disabled:opacity-50 transition-all hover:-translate-y-0.5 active:scale-95 mt-4"
           >
-            {/* Change button text dynamically depending on whether the server request is pending */}
             {loading ? 'Creating Account...' : 'Sign Up'}
           </button>
         </form>
-
-        <div className="mt-8 text-center text-sm">
-          <span className="text-slate-400">Already have an account? </span>
-          <button 
-            onClick={switchToLogin} 
-            className="text-up-green font-bold hover:underline ml-1"
-          >
-            Sign in
+        
+        <p className="mt-8 text-center text-sm font-medium text-slate-500">
+          Already have an account?{' '}
+          <button onClick={switchToLogin} className="font-bold text-indigo-600 hover:text-indigo-800 transition-colors">
+            Sign In
           </button>
-        </div>
-
+        </p>
       </div>
     </div>
   )

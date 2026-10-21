@@ -2,77 +2,63 @@ import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function UpdatePassword({ onUpdateSuccess }) {
-  // Store the new password entered by the user
   const [password, setPassword] = useState('')
-  // Track loading status during the password update request
   const [loading, setLoading] = useState(false)
-  // Store any error messages returned by Supabase
-  const [errorMessage, setErrorMessage] = useState('')
+  const [error, setError] = useState(null)
 
-  // Submit the new password to Supabase
-  const handleUpdatePassword = async (e) => {
+  const handleUpdate = async (e) => {
     e.preventDefault()
     setLoading(true)
-    setErrorMessage('')
-
-    // Update the user's password using the active recovery session token
-    const { error } = await supabase.auth.updateUser({
-      password: password,
-    })
+    setError(null)
+    
+    const { error } = await supabase.auth.updateUser({ password })
 
     if (error) {
-      setErrorMessage(error.message)
-      setLoading(false)
+      setError(error.message)
     } else {
-      setLoading(false)
-      onUpdateSuccess()
+      if (onUpdateSuccess) onUpdateSuccess()
     }
+    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex items-center justify-center p-4 relative overflow-hidden">
-      
-      <div className="absolute top-0 right-0 -mr-32 -mt-32 w-[500px] h-[500px] rounded-full bg-up-maroon/10 blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-0 left-0 -ml-32 -mb-32 w-[500px] h-[500px] rounded-full bg-up-green/10 blur-[120px] pointer-events-none"></div>
-
-      <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-slate-700/50 relative z-10">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] selection:bg-blue-100 selection:text-blue-900 font-sans">
+      <div className="w-full max-w-md bg-white/90 backdrop-blur-xl border border-slate-200 p-8 sm:p-10 rounded-3xl shadow-2xl animate-in fade-in zoom-in-95 duration-500">
         
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-up-green to-emerald-800 flex items-center justify-center font-black text-white text-xl mx-auto shadow-lg mb-3">
-            🔒
-          </div>
-          <h1 className="text-3xl font-black tracking-tight text-white">Set New Password</h1>
-          <p className="text-slate-400 text-sm mt-1">Please enter your secure new password below</p>
+        <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl mx-auto mb-6 shadow-inner border border-emerald-200">
+          🔒
         </div>
-
-        {errorMessage && (
-          <div className="mb-6 p-4 bg-red-950/50 border border-red-900/50 rounded-xl text-red-400 text-sm font-semibold">
-            ⚠ {errorMessage}
+        
+        <h2 className="text-3xl font-black text-slate-900 text-center tracking-tight mb-2">Secure Account</h2>
+        <p className="text-slate-500 text-center text-sm font-medium mb-8">Enter your new secure password below.</p>
+        
+        {error && (
+          <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold flex items-center gap-2">
+            ✖ {error}
           </div>
         )}
-
-        <form onSubmit={handleUpdatePassword} className="space-y-5">
+        
+        <form onSubmit={handleUpdate} className="space-y-5">
           <div>
-            <label className="block text-sm font-bold mb-1.5 text-slate-400">New Password</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">New Password</label>
             <input 
               type="password" 
               required
-              className="w-full border border-slate-700 bg-slate-950/50 text-slate-100 p-3.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-up-green focus:bg-slate-900 transition-all shadow-inner placeholder-slate-600"
               placeholder="••••••••"
+              className="w-full bg-slate-50 border border-slate-200 text-slate-900 p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all shadow-sm font-medium placeholder-slate-400"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-
+          
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-gradient-to-r from-up-green to-emerald-800 text-white font-black py-3.5 rounded-xl shadow-lg hover:shadow-emerald-500/20 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold py-4 rounded-xl shadow-md hover:shadow-lg hover:shadow-emerald-500/20 disabled:opacity-50 transition-all hover:-translate-y-0.5 active:scale-95 mt-4"
           >
             {loading ? 'Updating Password...' : 'Save New Password'}
           </button>
         </form>
-
       </div>
     </div>
   )
