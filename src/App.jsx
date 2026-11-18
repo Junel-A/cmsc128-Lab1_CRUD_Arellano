@@ -23,14 +23,15 @@ export default function App() {
   const [isCollaborative, setIsCollaborative] = useState(false)
   
   const [showMemberModal, setShowMemberModal] = useState(false)
-  const [collaboratorUserId, setCollaboratorUserId] = useState('')
+  const [collaboratorEmail, setCollaboratorEmail] = useState('')
   const [memberFeedback, setMemberFeedback] = useState({ type: '', message: '' })
+  const [workspaceUsers, setWorkspaceUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(false)
   
-  const [copied, setCopied] = useState(false)
   const [listToDelete, setListToDelete] = useState(null)
-  
   const [listToRename, setListToRename] = useState(null)
   const [renameListTitle, setRenameListTitle] = useState('')
+  const [renameIsCollaborative, setRenameIsCollaborative] = useState(false)
 
   const [tasks, setTasks] = useState([])
   const [formData, setFormData] = useState({
@@ -44,6 +45,8 @@ export default function App() {
   const [filterTag, setFilterTag] = useState('All')
   const [taskToDelete, setTaskToDelete] = useState(null)
   const [calendarDate, setCalendarDate] = useState(new Date())
+
+  const [userDisplayName, setUserDisplayName] = useState('User')
 
   useEffect(() => {
     const checkUserSession = async () => {
@@ -66,6 +69,37 @@ export default function App() {
     }
   }, [])
 
+  // Securely fetch exact user display name from profiles or metadata
+  useEffect(() => {
+    const fetchDisplayName = async () => {
+      if (!user) return
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (!error && data) {
+        const name = data.full_name || data.name || data.display_name || data.username
+        if (name) {
+          setUserDisplayName(name)
+          return
+        }
+      }
+
+      if (user.user_metadata?.full_name) {
+        setUserDisplayName(user.user_metadata.full_name)
+      } else if (user.user_metadata?.name) {
+        setUserDisplayName(user.user_metadata.name)
+      } else {
+        setUserDisplayName(user.email ? user.email.split('@')[0] : 'User')
+      }
+    }
+
+    fetchDisplayName()
+  }, [user, currentView])
+
   useEffect(() => {
     const loadLists = async () => {
       if (!user || isPasswordRecovery) return
@@ -76,7 +110,7 @@ export default function App() {
         .order('created_at', { ascending: true })
       
       if (error) {
-        console.error("Error fetching lists:", error)
+        setCustomAlert({ title: "Fetch Error", message: error.message, type: "error" })
         return
       }
 
@@ -110,7 +144,7 @@ export default function App() {
         .order('created_at', { ascending: false })
       
       if (error) {
-        console.error("Error fetching tasks:", error)
+        setCustomAlert({ title: "Fetch Error", message: error.message, type: "error" })
         return
       }
       setTasks(data || [])
@@ -118,6 +152,74 @@ export default function App() {
 
     loadTasks()
   }, [activeListId])
+
+  const activeList = lists.find(l => l.id === activeListId)
+
+  useEffect(() => {
+    const loadWorkspaceUsers = async () => {
+      if (!activeListId || !activeList?.is_collaborative) {
+        setWorkspaceUsers([])
+        setUsersLoading(false)
+        return
+      }
+
+      setUsersLoading(true)
+      const { data, error } = await supabase.rpc('get_workspace_users', {
+        target_list_id: activeListId
+      })
+
+      if (!error && data) {
+        setWorkspaceUsers(data)
+      } else {
+        setWorkspaceUsers([])
+      }
+      setUsersLoading(false)
+    }
+
+    loadWorkspaceUsers()
+  }, [activeListId, activeList?.is_collaborative])
+
+  const handleAcceptInvite = async () => {
+    if (!activeListId) return
+    setUsersLoading(true)
+
+    const { error } = await supabase.rpc('accept_workspace_invite', {
+      target_list_id: activeListId
+    })
+
+    if (!error) {
+      setWorkspaceUsers(prev => {
+        const exists = prev.some(u => u.id === user.id)
+        if (exists) {
+          return prev.map(u => u.id === user.id ? { ...u, status: 'accepted' } : u)
+        } else {
+          return [...prev, { id: user.id, email: user.email, display_name: userDisplayName, role: 'Member', status: 'accepted' }]
+        }
+      })
+      setCustomAlert({ title: "Success", message: "You have joined the workspace successfully!", type: "success" })
+    } else {
+      setCustomAlert({ title: "Error", message: error.message, type: "error" })
+    }
+    setUsersLoading(false)
+  }
+
+  const handleRejectInvite = async () => {
+    const { error } = await supabase.rpc('reject_workspace_invite', {
+      target_list_id: activeListId
+    })
+
+    if (!error) {
+      setCustomAlert({ title: "Invite Declined", message: "You have declined the workspace invitation.", type: "success" })
+      const { data: updatedLists } = await supabase.from('lists').select('*').order('created_at', { ascending: true })
+      if (updatedLists) {
+        setLists(updatedLists)
+        if (updatedLists.length > 0) setActiveListId(updatedLists[0].id)
+        else setActiveListId(null)
+      }
+    } else {
+      setCustomAlert({ title: "Error", message: error.message, type: "error" })
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault() 
@@ -195,6 +297,7 @@ export default function App() {
   const openRenameModal = (list) => {
     setListToRename(list)
     setRenameListTitle(list.title)
+    setRenameIsCollaborative(list.is_collaborative || false)
   }
 
   const executeRenameList = async (e) => {
@@ -203,16 +306,19 @@ export default function App() {
 
     const { error } = await supabase
       .from('lists')
-      .update({ title: renameListTitle.trim() })
+      .update({ 
+        title: renameListTitle.trim(),
+        is_collaborative: renameIsCollaborative 
+      })
       .eq('id', listToRename.id)
 
     if (error) {
-      setCustomAlert({ title: "Rename Failed", message: error.message, type: "error" })
+      setCustomAlert({ title: "Update Failed", message: error.message, type: "error" })
     } else {
       setListToRename(null)
       const { data: updatedLists } = await supabase.from('lists').select('*').order('created_at', { ascending: true })
       setLists(updatedLists || [])
-      setCustomAlert({ title: "Success", message: "Workspace renamed successfully.", type: "success" })
+      setCustomAlert({ title: "Success", message: "Workspace updated successfully.", type: "success" })
     }
   }
 
@@ -242,28 +348,20 @@ export default function App() {
     e.preventDefault()
     setMemberFeedback({ type: '', message: '' })
 
-    if (!collaboratorUserId.trim()) return
+    if (!collaboratorEmail.trim()) return
 
-    const { error } = await supabase
-      .from('list_members')
-      .insert([{
-        list_id: activeListId,
-        user_id: collaboratorUserId.trim()
-      }])
+    const { error } = await supabase.rpc('invite_member_by_email', {
+      target_list_id: activeListId,
+      target_email: collaboratorEmail.trim()
+    })
 
     if (error) {
       setMemberFeedback({ type: 'error', message: error.message })
     } else {
-      setMemberFeedback({ type: 'success', message: 'Collaborator added successfully!' })
-      setCollaboratorUserId('')
-    }
-  }
-
-  const handleCopyId = () => {
-    if (user?.id) {
-      navigator.clipboard.writeText(user.id)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setMemberFeedback({ type: 'success', message: 'Invite sent successfully!' })
+      setCollaboratorEmail('')
+      const { data } = await supabase.rpc('get_workspace_users', { target_list_id: activeListId })
+      if (data) setWorkspaceUsers(data)
     }
   }
 
@@ -415,13 +513,16 @@ export default function App() {
     )
   }
 
-  const activeList = lists.find(l => l.id === activeListId)
+  const currentUserRecord = workspaceUsers.find(u => u.id === user.id)
+  const isSharedNotOwner = activeList?.is_collaborative && activeList.owner_id !== user.id
+  const isPendingInvite = isSharedNotOwner && (usersLoading || !currentUserRecord || currentUserRecord.status === 'pending')
+  const confirmedMembers = workspaceUsers.filter(u => u.status === 'accepted')
 
   return (
     <div className="min-h-screen font-sans relative overflow-x-hidden pb-20 selection:bg-blue-100 selection:text-blue-900 text-slate-900 bg-slate-100 bg-[linear-gradient(to_right,#8080801a_1px,transparent_1px),linear-gradient(to_bottom,#8080801a_1px,transparent_1px)] bg-[size:24px_24px]">
       {renderCustomAlert()}
 
-      {/* Floating Modern Navbar */}
+      {/* Floating Modern Navbar (Secure Display Name) */}
       <div className="pt-6 px-4 md:px-8 max-w-7xl mx-auto sticky top-0 z-30">
         <nav className="w-full bg-white/80 backdrop-blur-xl border border-slate-200/60 rounded-3xl px-6 py-4 flex flex-col md:flex-row justify-between items-center shadow-sm gap-4 transition-all">
           <div className="flex items-center gap-4">
@@ -432,13 +533,10 @@ export default function App() {
               <span className="text-xl font-black tracking-tight text-slate-900 leading-tight">
                 ISKedyuler
               </span>
-              <div className="flex items-center gap-2 mt-0.5 group cursor-pointer" onClick={handleCopyId}>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">ID:</span>
-                <code className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 group-hover:border-blue-300 transition-colors">
-                  {user.id.substring(0, 8)}...
-                </code>
-                <span className={`text-[10px] font-extrabold transition-all ${copied ? 'text-emerald-500' : 'text-blue-600 opacity-0 group-hover:opacity-100'}`}>
-                  {copied ? '✓ COPIED' : 'COPY'}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">User:</span>
+                <span className="text-[10px] font-mono font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                  {userDisplayName}
                 </span>
               </div>
             </div>
@@ -561,7 +659,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Reusable Clean Modal Template */}
+      {/* New Space Modal */}
       {showNewListModal && (
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
           <div className="w-full max-w-md bg-white border border-slate-100 p-8 rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -611,13 +709,14 @@ export default function App() {
         </div>
       )}
 
+      {/* Edit Space Modal */}
       {listToRename && (
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-100 p-8 rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h3 className="text-2xl font-extrabold text-slate-900 mb-6 tracking-tight">Rename Space</h3>
+            <h3 className="text-2xl font-extrabold text-slate-900 mb-6 tracking-tight">Edit Space</h3>
             <form onSubmit={executeRenameList} className="space-y-5">
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">New Title</label>
+                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Space Title</label>
                 <input 
                   type="text"
                   required
@@ -626,6 +725,21 @@ export default function App() {
                   onChange={(e) => setRenameListTitle(e.target.value)}
                 />
               </div>
+
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <input 
+                  type="checkbox"
+                  id="editCollabCheck"
+                  checked={renameIsCollaborative}
+                  onChange={(e) => setRenameIsCollaborative(e.target.checked)}
+                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <label htmlFor="editCollabCheck" className="text-sm font-bold text-slate-700 cursor-pointer select-none">
+                  Shared Space
+                  <span className="block text-xs font-medium text-slate-500 mt-0.5">Toggle between personal and shared access.</span>
+                </label>
+              </div>
+
               <div className="flex gap-3 pt-3">
                 <button 
                   type="button"
@@ -638,7 +752,7 @@ export default function App() {
                   type="submit"
                   className="flex-1 bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 transition-all"
                 >
-                  Save
+                  Save Changes
                 </button>
               </div>
             </form>
@@ -646,6 +760,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Invite Member Modal */}
       {showMemberModal && (
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white border border-slate-100 p-8 rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -654,7 +769,7 @@ export default function App() {
               <button onClick={() => setShowMemberModal(false)} className="text-slate-400 hover:text-slate-800 font-bold transition-colors">✕</button>
             </div>
             <p className="text-slate-500 text-sm mb-6 leading-relaxed">
-              Add users to <span className="font-bold text-slate-800">{activeList?.title}</span> via UUID.
+              Add users to <span className="font-bold text-slate-800">{activeList?.title}</span> via email address.
             </p>
             {memberFeedback.message && (
               <div className={`mb-5 p-3.5 rounded-xl text-sm font-bold border flex items-center gap-2 ${
@@ -666,12 +781,12 @@ export default function App() {
             <form onSubmit={handleAddMember} className="space-y-5">
               <div>
                 <input 
-                  type="text"
+                  type="email"
                   required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none font-mono"
-                  placeholder="Paste UUID here..."
-                  value={collaboratorUserId}
-                  onChange={(e) => setCollaboratorUserId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                  placeholder="Enter user email (e.g., user@up.edu.ph)"
+                  value={collaboratorEmail}
+                  onChange={(e) => setCollaboratorEmail(e.target.value)}
                 />
               </div>
               <div className="flex gap-3 pt-3">
@@ -742,7 +857,11 @@ export default function App() {
         <div className="pt-12">
           <ProfileView 
             user={user} 
-            onUserUpdated={(updatedUser) => setUser(updatedUser)} 
+            onUserUpdated={(updatedUser) => {
+              setUser(updatedUser)
+              const newName = updatedUser?.user_metadata?.full_name || updatedUser?.user_metadata?.name
+              if (newName) setUserDisplayName(newName)
+            }} 
             goToTasks={() => setCurrentView('tasks')} 
           />
         </div>
@@ -807,11 +926,30 @@ export default function App() {
                   <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
                     {activeList.title}
                   </h1>
+
+                  {/* Confirmed Members Display */}
+                  {activeList.is_collaborative && !isPendingInvite && (
+                    <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-100">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Members:</span>
+                      {confirmedMembers.map(member => (
+                        <span 
+                          key={member.id} 
+                          className={`text-[11px] px-2.5 py-1 rounded-full border flex items-center gap-1 font-bold shadow-sm ${
+                            member.role === 'Owner' 
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                              : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                          }`}
+                        >
+                          {member.role === 'Owner' ? '👑 Owner:' : '👤'} {member.display_name || member.email.split('@')[0]}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2">
                   {activeList.owner_id === user.id && (
-                    <button onClick={() => openRenameModal(activeList)} className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-colors border border-slate-200" title="Rename Space">✏️</button>
+                    <button onClick={() => openRenameModal(activeList)} className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-colors border border-slate-200" title="Edit Space">✏️</button>
                   )}
                   {activeList.is_collaborative && activeList.owner_id === user.id && (
                     <button onClick={() => setShowMemberModal(true)} className="px-4 py-2.5 bg-slate-50 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-100 transition-colors flex items-center gap-2 border border-slate-200">
@@ -825,171 +963,196 @@ export default function App() {
               </div>
             )}
             
-            {/* Inline Task Input Engine */}
-            {activeList && (
-              <form 
-                onSubmit={handleSubmit} 
-                className={`p-2 pl-6 rounded-2xl transition-all duration-300 ease-in-out flex flex-col md:flex-row items-center gap-4 ${
-                  editingId 
-                    ? 'bg-white ring-2 ring-blue-500 shadow-xl scale-[1.02] border-none' 
-                    : 'bg-white border border-slate-200 shadow-sm focus-within:ring-2 focus-within:ring-slate-200 focus-within:shadow-md'
-                }`}
-              >
-                <input 
-                  type="text" 
-                  required
-                  className="w-full flex-1 bg-transparent text-slate-900 py-4 text-base focus:outline-none placeholder-slate-400 font-bold" 
-                  placeholder={editingId ? "Update task..." : "Type a new task..."}
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                />
-                
-                <div className="w-full md:w-auto flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 pr-2">
-                  <input 
-                    type="date" 
-                    className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
-                    value={formData.due_date}
-                    onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                  />
-                  <select 
-                    className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
-                    value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Med</option>
-                    <option value="High">High</option>
-                  </select>
-                  <select 
-                    className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
-                    value={formData.tag}
-                    onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
-                  >
-                    <option value="School">School</option>
-                    <option value="Personal">Personal</option>
-                    <option value="Others">Others</option>
-                  </select>
-                  
-                  {editingId ? (
-                    <div className="flex items-center gap-1">
-                      <button type="submit" className="bg-blue-600 text-white p-2.5 rounded-xl font-bold text-xs hover:bg-blue-700 transition-colors shadow-sm">Save</button>
-                      <button type="button" onClick={cancelEdit} className="bg-slate-100 text-slate-600 p-2.5 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors border border-slate-200">✕</button>
-                    </div>
-                  ) : (
-                    <button type="submit" className="bg-slate-900 text-white p-2.5 rounded-xl font-bold text-xs hover:bg-slate-800 transition-all shadow-md active:scale-95 whitespace-nowrap">
-                      Add
-                    </button>
-                  )}
+            {/* Gated Workspace Content (Hidden if invite is pending) */}
+            {activeList && isPendingInvite ? (
+              <div className="bg-white border border-amber-200 p-12 rounded-3xl shadow-lg text-center flex flex-col items-center">
+                <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-4xl mb-5 shadow-sm">
+                  ✉️
                 </div>
-              </form>
-            )}
-
-            {/* Task List Feed */}
-            {activeList && (
-              <div className={`transition-all duration-500 ${editingId ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-                
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 px-2">
-                  <div className="flex space-x-2">
+                <h2 className="text-2xl font-extrabold text-slate-900 mb-2 tracking-tight">Workspace Invitation Pending</h2>
+                <p className="text-slate-500 text-sm max-w-md mb-8 leading-relaxed font-medium">
+                  You have been invited to collaborate on <span className="font-bold text-slate-800">"{activeList.title}"</span>. You must accept the invitation before you can view or manage tasks in this space.
+                </p>
+                <div className="flex items-center gap-4 w-full max-w-sm">
+                  <button
+                    onClick={handleAcceptInvite}
+                    className="flex-1 bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 shadow-md hover:shadow-lg transition-all"
+                  >
+                    Accept Invite
+                  </button>
+                  <button
+                    onClick={handleRejectInvite}
+                    className="flex-1 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-all border border-slate-200"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ) : activeList && (
+              <>
+                {/* Inline Task Input Engine */}
+                <form 
+                  onSubmit={handleSubmit} 
+                  className={`p-2 pl-6 rounded-2xl transition-all duration-300 ease-in-out flex flex-col md:flex-row items-center gap-4 ${
+                    editingId 
+                      ? 'bg-white ring-2 ring-blue-500 shadow-xl scale-[1.02] border-none' 
+                      : 'bg-white border border-slate-200 shadow-sm focus-within:ring-2 focus-within:ring-slate-200 focus-within:shadow-md'
+                  }`}
+                >
+                  <input 
+                    type="text" 
+                    required
+                    className="w-full flex-1 bg-transparent text-slate-900 py-4 text-base focus:outline-none placeholder-slate-400 font-bold" 
+                    placeholder={editingId ? "Update task..." : "Type a new task..."}
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  />
+                  
+                  <div className="w-full md:w-auto flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 pr-2">
+                    <input 
+                      type="date" 
+                      className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                      value={formData.due_date}
+                      onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                    />
                     <select 
-                      value={filterTag} 
-                      onChange={(e) => setFilterTag(e.target.value)}
-                      className="text-xs bg-transparent border-none focus:ring-0 font-bold text-slate-500 cursor-pointer hover:text-slate-900 transition-colors"
+                      className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                      value={formData.priority}
+                      onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                     >
-                      <option value="All">Filter: All</option>
+                      <option value="Low">Low</option>
+                      <option value="Medium">Med</option>
+                      <option value="High">High</option>
+                    </select>
+                    <select 
+                      className="bg-slate-50 border border-slate-200 text-slate-600 p-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                      value={formData.tag}
+                      onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
+                    >
                       <option value="School">School</option>
                       <option value="Personal">Personal</option>
                       <option value="Others">Others</option>
                     </select>
-                    <select 
-                      value={sortBy} 
-                      onChange={(e) => setSortBy(e.target.value)}
-                      className="text-xs bg-transparent border-none focus:ring-0 font-bold text-slate-500 cursor-pointer hover:text-slate-900 transition-colors"
-                    >
-                      <option value="created_at">Sort: Newest</option>
-                      <option value="priority">Sort: Priority</option>
-                      <option value="due_date">Sort: Due Date</option>
-                    </select>
+                    
+                    {editingId ? (
+                      <div className="flex items-center gap-1">
+                        <button type="submit" className="bg-blue-600 text-white p-2.5 rounded-xl font-bold text-xs hover:bg-blue-700 transition-colors shadow-sm">Save</button>
+                        <button type="button" onClick={cancelEdit} className="bg-slate-100 text-slate-600 p-2.5 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors border border-slate-200">✕</button>
+                      </div>
+                    ) : (
+                      <button type="submit" className="bg-slate-900 text-white p-2.5 rounded-xl font-bold text-xs hover:bg-slate-800 transition-all shadow-md active:scale-95 whitespace-nowrap">
+                        Add
+                      </button>
+                    )}
                   </div>
-                </div>
-                
-                {displayedTasks.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 bg-transparent">
-                    <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center text-2xl mb-4">🍃</div>
-                    <p className="text-slate-900 font-extrabold text-lg tracking-tight">Nothing here yet</p>
-                    <p className="text-slate-500 text-sm mt-1 font-medium">Use the input above to create a task.</p>
-                  </div>
-                ) : (
-                  <ul className="flex flex-col gap-3">
-                    {displayedTasks.map((task) => (
-                      <li 
-                        key={task.id} 
-                        className={`group p-4 pl-5 rounded-2xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all duration-200 ease-out border hover:shadow-md ${
-                          task.is_done 
-                            ? 'border-transparent bg-slate-50 opacity-60' 
-                            : 'border-slate-200 bg-white'
-                        }`}
+                </form>
+
+                {/* Task List Feed */}
+                <div className={`transition-all duration-500 ${editingId ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+                  
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 px-2">
+                    <div className="flex space-x-2">
+                      <select 
+                        value={filterTag} 
+                        onChange={(e) => setFilterTag(e.target.value)}
+                        className="text-xs bg-transparent border-none focus:ring-0 font-bold text-slate-500 cursor-pointer hover:text-slate-900 transition-colors"
                       >
-                        
-                        <div className="flex items-center gap-4 flex-1">
-                          <button 
-                            onClick={() => toggleDone(task.id, task.is_done)}
-                            className={`w-6 h-6 flex-shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
-                              task.is_done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-emerald-400'
-                            }`}
-                          >
-                            <span className="text-[10px] font-black">✓</span>
-                          </button>
+                        <option value="All">Filter: All</option>
+                        <option value="School">School</option>
+                        <option value="Personal">Personal</option>
+                        <option value="Others">Others</option>
+                      </select>
+                      <select 
+                        value={sortBy} 
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="text-xs bg-transparent border-none focus:ring-0 font-bold text-slate-500 cursor-pointer hover:text-slate-900 transition-colors"
+                      >
+                        <option value="created_at">Sort: Newest</option>
+                        <option value="priority">Sort: Priority</option>
+                        <option value="due_date">Sort: Due Date</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  {displayedTasks.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 bg-transparent">
+                      <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center text-2xl mb-4">🍃</div>
+                      <p className="text-slate-900 font-extrabold text-lg tracking-tight">Nothing here yet</p>
+                      <p className="text-slate-500 text-sm mt-1 font-medium">Use the input above to create a task.</p>
+                    </div>
+                  ) : (
+                    <ul className="flex flex-col gap-3">
+                      {displayedTasks.map((task) => (
+                        <li 
+                          key={task.id} 
+                          className={`group p-4 pl-5 rounded-2xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition-all duration-200 ease-out border hover:shadow-md ${
+                            task.is_done 
+                              ? 'border-transparent bg-slate-50 opacity-60' 
+                              : 'border-slate-200 bg-white'
+                          }`}
+                        >
                           
-                          <div className={`flex flex-col ${task.is_done ? 'line-through text-slate-400' : ''}`}>
-                            <h3 className={`font-extrabold text-base tracking-tight mb-1 ${task.is_done ? 'text-slate-500' : 'text-slate-900'}`}>
-                              {task.title}
-                            </h3>
-                            <div className="flex flex-wrap gap-2">
-                              {task.due_date && (
-                                <span className="text-slate-500 font-bold text-[10px] flex items-center gap-1 uppercase tracking-wider">
-                                  📅 {task.due_date.split('T')[0]}
-                                </span>
-                              )}
-                              {task.priority && (
-                                <span className={`font-bold text-[10px] uppercase tracking-wider flex items-center ${
-                                  task.priority === 'High' ? 'text-red-500' : 
-                                  task.priority === 'Medium' ? 'text-amber-500' : 
-                                  'text-blue-500'
-                                }`}>
-                                  • {task.priority}
-                                </span>
-                              )}
-                              {task.tag && (
-                                <span className="text-slate-400 font-bold text-[10px] uppercase tracking-wider">
-                                  #{task.tag}
-                                </span>
-                              )}
+                          <div className="flex items-center gap-4 flex-1">
+                            <button 
+                              onClick={() => toggleDone(task.id, task.is_done)}
+                              className={`w-6 h-6 flex-shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
+                                task.is_done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-emerald-400'
+                              }`}
+                            >
+                              <span className="text-[10px] font-black">✓</span>
+                            </button>
+                            
+                            <div className={`flex flex-col ${task.is_done ? 'line-through text-slate-400' : ''}`}>
+                              <h3 className={`font-extrabold text-base tracking-tight mb-1 ${task.is_done ? 'text-slate-500' : 'text-slate-900'}`}>
+                                {task.title}
+                              </h3>
+                              <div className="flex flex-wrap gap-2">
+                                {task.due_date && (
+                                  <span className="text-slate-500 font-bold text-[10px] flex items-center gap-1 uppercase tracking-wider">
+                                    📅 {task.due_date.split('T')[0]}
+                                  </span>
+                                )}
+                                {task.priority && (
+                                  <span className={`font-bold text-[10px] uppercase tracking-wider flex items-center ${
+                                    task.priority === 'High' ? 'text-red-500' : 
+                                    task.priority === 'Medium' ? 'text-amber-500' : 
+                                    'text-blue-500'
+                                  }`}>
+                                    • {task.priority}
+                                  </span>
+                                )}
+                                {task.tag && (
+                                  <span className="text-slate-400 font-bold text-[10px] uppercase tracking-wider">
+                                    #{task.tag}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity pl-10 md:pl-0">
-                          <button 
-                            onClick={() => startEdit(task)}
-                            disabled={task.is_done}
-                            className={`p-2 rounded-lg font-bold text-xs transition-colors ${task.is_done ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-800'}`}
-                            title="Edit"
-                          >
-                            ✏️
-                          </button>
-                          <button 
-                            onClick={() => confirmDeleteTask(task)}
-                            className="p-2 rounded-lg font-bold text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                            title="Delete"
-                          >
-                            🗑
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                          <div className="flex items-center gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity pl-10 md:pl-0">
+                            <button 
+                              onClick={() => startEdit(task)}
+                              disabled={task.is_done}
+                              className={`p-2 rounded-lg font-bold text-xs transition-colors ${task.is_done ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-800'}`}
+                              title="Edit"
+                            >
+                              ✏️
+                            </button>
+                            <button 
+                              onClick={() => confirmDeleteTask(task)}
+                              className="p-2 rounded-lg font-bold text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                              title="Delete"
+                            >
+                              🗑
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
