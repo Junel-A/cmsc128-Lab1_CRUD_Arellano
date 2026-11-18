@@ -140,7 +140,7 @@ export default function ProfileView({ user, onUserUpdated, goToTasks }) {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Email Address (Unique Validation)</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Email Address</label>
             <input 
               type="email" 
               required
