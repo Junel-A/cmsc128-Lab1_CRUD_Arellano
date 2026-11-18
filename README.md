@@ -7,7 +7,7 @@
 
 ---
 
-## 🛠️ Summary of Refactoring & Optimizations (Lab 4)
+## Summary of Refactoring & Optimizations (Lab 4)
 * **Code Clean-up:** Removed dead code, unused console logs, and organized component concerns cleanly.
 * **Backend Optimization:** Eliminated redundant queries by leveraging robust PostgreSQL views/RPC functions (`get_workspace_users`) with `SECURITY DEFINER` to securely bypass RLS recursion while keeping strict UBAC (User-Based Access Control) rules intact.
 * **UX/UI Audit:** Implemented clear feedback loops (loading states, custom alert modals, smooth animations), consistent component styling, and a gated workspace UI requiring explicit invite acceptance or rejection before rendering content.
